@@ -77,6 +77,7 @@ setup(
             'staticweb=swift.common.middleware.staticweb:filter_factory',
             'tempauth=swift.common.middleware.tempauth:filter_factory',
             'recon=swift.common.middleware.recon:filter_factory',
+            'latency=swift.common.middleware.latency:filter_factory',
             ],
         },
     )
