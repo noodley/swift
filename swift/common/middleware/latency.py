@@ -2,14 +2,16 @@ from eventlet import sleep
 
 
 class LatencyController(object):
-    '''
+    """
     Middleware to add simulated latency into a wsgi pipeline.
+
     latency sets the total latency. request_latency and response_latency can
     be used to set the request or response latency, respectively. If either
     the request or response latency are set to empty (default), the value is
     understood to mean half of the latency value
+
     Each config value is the number of miliseconds of latency to add.
-    '''
+    """
     def __init__(self, app, conf):
         self.app = app
         latency = conf.get('latency', '')
