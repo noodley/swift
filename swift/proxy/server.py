@@ -54,7 +54,7 @@ from webob import Request, Response
 
 from swift.common.ring import Ring
 from swift.common.utils import cache_from_env, ContextPool, get_logger, \
-    get_remote_client, normalize_timestamp, split_path, TRUE_VALUES
+    get_remote_client, normalize_timestamp, split_path, TRUE_VALUES, get_param
 from swift.common.bufferedhttp import http_connect
 from swift.common.constraints import check_metadata, check_object_creation, \
     check_utf8, CONTAINER_LISTING_LIMIT, MAX_ACCOUNT_NAME_LENGTH, \
@@ -851,6 +851,56 @@ class ObjectController(Controller):
         resp = self.GETorHEAD_base(req, _('Object'), partition,
                 self.iter_nodes(partition, nodes, self.app.object_ring),
                 req.path_info, self.app.object_ring.replica_count)
+
+        if 'x-object-versions' in resp.headers:
+            # handle a versioned object
+            lcontainer, lprefix = \
+                resp.headers['x-object-versions'].split('/', 1)
+            lpartition, lnodes = self.app.container_ring.get_nodes(
+                self.account_name, lcontainer)
+            marker = ''
+            listing = []
+            while True:
+                lreq = Request.blank('/%s/%s?prefix=%s&format=json&marker=%s' %
+                    (quote(self.account_name), quote(lcontainer),
+                     quote(lprefix), quote(marker)))
+                shuffle(lnodes)
+                lresp = self.GETorHEAD_base(lreq, _('Container'), lpartition,
+                    lnodes, lreq.path_info,
+                    self.app.container_ring.replica_count)
+                if lresp.status_int // 100 != 2:
+                    lresp = HTTPNotFound(request=req)
+                    lresp.headers['X-Object-Versions'] = \
+                        resp.headers['x-object-versions']
+                    return lresp
+                if 'swift.authorize' in req.environ:
+                    req.acl = lresp.headers.get('x-container-read')
+                    aresp = req.environ['swift.authorize'](req)
+                    if aresp:
+                        return aresp
+                sublisting = json.loads(lresp.body)
+                if not sublisting:
+                    break
+                listing.extend(sublisting)
+                if len(listing) > CONTAINER_LISTING_LIMIT:
+                    break
+                marker = sublisting[-1]['name']
+            # now that we have a list of the versions, pick the right one
+            which_version = get_param(req, 'v')
+            if which_version is None:
+                # get the last one (i.e. the "current")
+                which_version = listing[-1]['name'][len(lprefix):]
+            ver_obj_name = lprefix + which_version
+            ver_req = Request.blank('/%s/%s/%s' % (quote(self.account_name),
+                        quote(lcontainer), quote(ver_obj_name)))
+            ver_partition, ver_nodes = self.app.object_ring.get_nodes(
+                self.account_name, lcontainer, ver_obj_name)
+            shuffle(ver_nodes)
+            resp = self.GETorHEAD_base(ver_req, _('Object'), ver_partition,
+                        self.iter_nodes(ver_partition, ver_nodes,
+                        self.app.object_ring), ver_req.path_info,
+                        self.app.object_ring.replica_count)
+
         # If we get a 416 Requested Range Not Satisfiable we have to check if
         # we were actually requesting a manifest object and then redo the range
         # request on the whole object.
