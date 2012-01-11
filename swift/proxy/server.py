@@ -852,72 +852,30 @@ class ObjectController(Controller):
                 self.iter_nodes(partition, nodes, self.app.object_ring),
                 req.path_info, self.app.object_ring.replica_count)
 
-        if 'x-object-versions' in resp.headers:
-            # handle a versioned object
-            lcontainer, lprefix = \
-                resp.headers['x-object-versions'].split('/', 1)
-            lpartition, lnodes = self.app.container_ring.get_nodes(
-                self.account_name, lcontainer)
-            marker = ''
-            listing = []
-            while True:
-                lreq = Request.blank('/%s/%s?prefix=%s&format=json&marker=%s' %
-                    (quote(self.account_name), quote(lcontainer),
-                     quote(lprefix), quote(marker)))
-                shuffle(lnodes)
-                lresp = self.GETorHEAD_base(lreq, _('Container'), lpartition,
-                    lnodes, lreq.path_info,
-                    self.app.container_ring.replica_count)
-                if lresp.status_int // 100 != 2:
-                    lresp = HTTPNotFound(request=req)
-                    lresp.headers['X-Object-Versions'] = \
-                        resp.headers['x-object-versions']
-                    return lresp
-                if 'swift.authorize' in req.environ:
-                    req.acl = lresp.headers.get('x-container-read')
-                    aresp = req.environ['swift.authorize'](req)
-                    if aresp:
-                        return aresp
-                sublisting = json.loads(lresp.body)
-                if not sublisting:
-                    break
-                listing.extend(sublisting)
-                if len(listing) > CONTAINER_LISTING_LIMIT:
-                    break
-                marker = sublisting[-1]['name']
-            # now that we have a list of the versions, pick the right one
-            which_version = get_param(req, 'v')
-            if which_version is None:
-                # get the last one (i.e. the "current")
-                which_version = listing[-1]['name'][len(lprefix):]
-            ver_obj_name = lprefix + which_version
-            ver_req = Request.blank('/%s/%s/%s' % (quote(self.account_name),
-                        quote(lcontainer), quote(ver_obj_name)))
-            ver_partition, ver_nodes = self.app.object_ring.get_nodes(
-                self.account_name, lcontainer, ver_obj_name)
-            shuffle(ver_nodes)
-            resp = self.GETorHEAD_base(ver_req, _('Object'), ver_partition,
-                        self.iter_nodes(ver_partition, ver_nodes,
-                        self.app.object_ring), ver_req.path_info,
-                        self.app.object_ring.replica_count)
-
         # If we get a 416 Requested Range Not Satisfiable we have to check if
-        # we were actually requesting a manifest object and then redo the range
-        # request on the whole object.
+        # we were actually requesting a manifest or verson object and then redo
+        # the range request on the whole object.
         if resp.status_int == 416:
             req_range = req.range
             req.range = None
             resp2 = self.GETorHEAD_base(req, _('Object'), partition,
                     self.iter_nodes(partition, nodes, self.app.object_ring),
                     req.path_info, self.app.object_ring.replica_count)
-            if 'x-object-manifest' not in resp2.headers:
+            if 'x-object-manifest' not in resp2.headers or \
+                'x-object-versions' not in resp2.headers:
                 return resp
             resp = resp2
             req.range = req_range
 
-        if 'x-object-manifest' in resp.headers:
+        if 'x-object-manifest' in resp.headers or \
+                'x-object-versions' in resp.headers:
+            # we don't allow versioning of manifest files
+            if 'x-object-manifest' in resp.headers:
+                check_header = 'x-object-manifest'
+            else:
+                check_header = 'x-object-versions'
             lcontainer, lprefix = \
-                resp.headers['x-object-manifest'].split('/', 1)
+                resp.headers[check_header].split('/', 1)
             lpartition, lnodes = self.app.container_ring.get_nodes(
                 self.account_name, lcontainer)
             marker = ''
@@ -932,8 +890,8 @@ class ObjectController(Controller):
                     self.app.container_ring.replica_count)
                 if lresp.status_int // 100 != 2:
                     lresp = HTTPNotFound(request=req)
-                    lresp.headers['X-Object-Manifest'] = \
-                        resp.headers['x-object-manifest']
+                    lresp.headers[check_header] = \
+                        resp.headers[check_header]
                     return lresp
                 if 'swift.authorize' in req.environ:
                     req.acl = lresp.headers.get('x-container-read')
@@ -948,7 +906,24 @@ class ObjectController(Controller):
                     break
                 marker = sublisting[-1]['name']
 
-            if len(listing) > CONTAINER_LISTING_LIMIT:
+            if check_header == 'x-object-versions':
+                # now that we have a list of the versions, pick the right one
+                which_version = get_param(req, 'v')
+                if which_version is None:
+                    # get the last one (i.e. the "current")
+                    which_version = listing[-1]['name'][len(lprefix):]
+                ver_obj_name = lprefix + which_version
+                ver_req = Request.blank('/%s/%s/%s' % (
+                        quote(self.account_name), quote(lcontainer),
+                        quote(ver_obj_name)))
+                ver_partition, ver_nodes = self.app.object_ring.get_nodes(
+                    self.account_name, lcontainer, ver_obj_name)
+                shuffle(ver_nodes)
+                resp = self.GETorHEAD_base(ver_req, _('Object'), ver_partition,
+                            self.iter_nodes(ver_partition, ver_nodes,
+                            self.app.object_ring), ver_req.path_info,
+                            self.app.object_ring.replica_count)
+            elif len(listing) > CONTAINER_LISTING_LIMIT:
                 # We will serve large objects with a ton of segments with
                 # chunked transfer encoding.
 
