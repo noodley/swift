@@ -909,6 +909,9 @@ class ObjectController(Controller):
             if check_header == 'x-object-versions':
                 # now that we have a list of the versions, pick the right one
                 which_version = get_param(req, 'v')
+                if which_version == "0" or not listing:
+                    # special case to return the original object
+                    return resp
                 if which_version is None:
                     # get the last one (i.e. the "current")
                     which_version = listing[-1]['name'][len(lprefix):]
