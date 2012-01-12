@@ -60,7 +60,8 @@ from swift.common.constraints import check_metadata, check_object_creation, \
     check_utf8, CONTAINER_LISTING_LIMIT, MAX_ACCOUNT_NAME_LENGTH, \
     MAX_CONTAINER_NAME_LENGTH, MAX_FILE_SIZE
 from swift.common.exceptions import ChunkReadTimeout, \
-    ChunkWriteTimeout, ConnectionTimeout
+    ChunkWriteTimeout, ConnectionTimeout, ListingIterNotFound, \
+    ListingIterNotAuthorized
 
 
 def update_headers(response, headers):
@@ -837,6 +838,33 @@ class ObjectController(Controller):
         self.container_name = unquote(container_name)
         self.object_name = unquote(object_name)
 
+    def _listing_iter(self, lcontainer, lprefix, env):
+        lpartition, lnodes = self.app.container_ring.get_nodes(
+            self.account_name, lcontainer)
+        marker = ''
+        while True:
+            lreq = Request.blank(
+                '/%s/%s?prefix=%s&format=json&marker=%s' %
+                (quote(self.account_name), quote(lcontainer),
+                 quote(lprefix), quote(marker)))
+            shuffle(lnodes)
+            lresp = self.GETorHEAD_base(lreq, _('Container'),
+                lpartition, lnodes, lreq.path_info,
+                self.app.container_ring.replica_count)
+            if lresp.status_int // 100 != 2:
+                raise ListingIterNotFound()
+            if 'swift.authorize' in env:
+                req.acl = lresp.headers.get('x-container-read')
+                aresp = req.environ['swift.authorize'](req)
+                if aresp:
+                    raise ListingIterNotAuthorized(aresp)
+            sublisting = json.loads(lresp.body)
+            if not sublisting:
+                break
+            for obj in sublisting:
+                yield obj
+            marker = sublisting[-1]['name']
+
     def GETorHEAD(self, req):
         """Handle HTTP GET or HEAD requests."""
         if 'swift.authorize' in req.environ:
@@ -876,35 +904,15 @@ class ObjectController(Controller):
                 check_header = 'x-object-versions'
             lcontainer, lprefix = \
                 resp.headers[check_header].split('/', 1)
-            lpartition, lnodes = self.app.container_ring.get_nodes(
-                self.account_name, lcontainer)
-            marker = ''
-            listing = []
-            while True:
-                lreq = Request.blank('/%s/%s?prefix=%s&format=json&marker=%s' %
-                    (quote(self.account_name), quote(lcontainer),
-                     quote(lprefix), quote(marker)))
-                shuffle(lnodes)
-                lresp = self.GETorHEAD_base(lreq, _('Container'), lpartition,
-                    lnodes, lreq.path_info,
-                    self.app.container_ring.replica_count)
-                if lresp.status_int // 100 != 2:
-                    lresp = HTTPNotFound(request=req)
-                    lresp.headers[check_header] = \
-                        resp.headers[check_header]
-                    return lresp
-                if 'swift.authorize' in req.environ:
-                    req.acl = lresp.headers.get('x-container-read')
-                    aresp = req.environ['swift.authorize'](req)
-                    if aresp:
-                        return aresp
-                sublisting = json.loads(lresp.body)
-                if not sublisting:
-                    break
-                listing.extend(sublisting)
-                if len(listing) > CONTAINER_LISTING_LIMIT:
-                    break
-                marker = sublisting[-1]['name']
+            try:
+                listing = list(self._listing_iter(lcontainer, lprefix,
+                                req.environ))
+            except ListingIterNotFound:
+                lresp = HTTPNotFound(request=req)
+                lresp.headers[check_header] = resp.headers[check_header]
+                return lresp
+            except ListingIterNotAuthorized, err:
+                return err.aresp
 
             if check_header == 'x-object-versions':
                 # now that we have a list of the versions, pick the right one
@@ -922,10 +930,12 @@ class ObjectController(Controller):
                 ver_partition, ver_nodes = self.app.object_ring.get_nodes(
                     self.account_name, lcontainer, ver_obj_name)
                 shuffle(ver_nodes)
+                orig_check_header_value = resp.headers[check_header]
                 resp = self.GETorHEAD_base(ver_req, _('Object'), ver_partition,
                             self.iter_nodes(ver_partition, ver_nodes,
                             self.app.object_ring), ver_req.path_info,
                             self.app.object_ring.replica_count)
+                resp.headers[check_header] = orig_check_header_value
             elif len(listing) > CONTAINER_LISTING_LIMIT:
                 # We will serve large objects with a ton of segments with
                 # chunked transfer encoding.
