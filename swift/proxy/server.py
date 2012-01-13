@@ -919,6 +919,7 @@ class ObjectController(Controller):
                 which_version = get_param(req, 'v')
                 if which_version == "0" or not listing:
                     # special case to return the original object
+                    resp.headers['x-object-current-version'] = '0'
                     return resp
                 if which_version is None:
                     # get the last one (i.e. the "current")
@@ -936,6 +937,7 @@ class ObjectController(Controller):
                             self.app.object_ring), ver_req.path_info,
                             self.app.object_ring.replica_count)
                 resp.headers[check_header] = orig_check_header_value
+                resp.headers['x-object-current-version'] = which_version
             elif len(listing) > CONTAINER_LISTING_LIMIT:
                 resp = Response(headers=resp.headers, request=req,
                                 conditional_response=True)
