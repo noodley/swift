@@ -937,37 +937,6 @@ class ObjectController(Controller):
                             self.app.object_ring.replica_count)
                 resp.headers[check_header] = orig_check_header_value
             elif len(listing) > CONTAINER_LISTING_LIMIT:
-                # We will serve large objects with a ton of segments with
-                # chunked transfer encoding.
-
-                def listing_iter():
-                    marker = ''
-                    while True:
-                        lreq = Request.blank(
-                            '/%s/%s?prefix=%s&format=json&marker=%s' %
-                            (quote(self.account_name), quote(lcontainer),
-                             quote(lprefix), quote(marker)))
-                        lresp = self.GETorHEAD_base(lreq, _('Container'),
-                            lpartition, lnodes, lreq.path_info,
-                            self.app.container_ring.replica_count)
-                        if lresp.status_int // 100 != 2:
-                            raise Exception(_('Object manifest GET could not '
-                                'continue listing: %s %s') %
-                                (req.path, lreq.path))
-                        if 'swift.authorize' in req.environ:
-                            req.acl = lresp.headers.get('x-container-read')
-                            aresp = req.environ['swift.authorize'](req)
-                            if aresp:
-                                raise Exception(_('Object manifest GET could '
-                                    'not continue listing: %s %s') %
-                                    (req.path, aresp))
-                        sublisting = json.loads(lresp.body)
-                        if not sublisting:
-                            break
-                        for obj in sublisting:
-                            yield obj
-                        marker = sublisting[-1]['name']
-
                 resp = Response(headers=resp.headers, request=req,
                                 conditional_response=True)
                 if req.method == 'HEAD':
@@ -986,7 +955,8 @@ class ObjectController(Controller):
                     return head_response
                 else:
                     resp.app_iter = SegmentedIterable(self, lcontainer,
-                                                      listing_iter(), resp)
+                        self._listing_iter(lcontainer, lprefix, req.environ),
+                        resp)
 
             else:
                 # For objects with a reasonable number of segments, we'll serve
