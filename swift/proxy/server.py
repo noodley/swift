@@ -1384,7 +1384,7 @@ class ObjectController(Controller):
             elif listing:
                 # no version specified, but we have a listing
                 which_version = listing[-1]['name'][len(lprefix):]
-                container_name_to_delete = self.container_name
+                container_name_to_delete = lcontainer
                 object_name_to_delete = lprefix + which_version
             else:
                 container_name_to_delete = self.container_name
