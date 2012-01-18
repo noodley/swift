@@ -1353,6 +1353,47 @@ class ObjectController(Controller):
     @delay_denial
     def DELETE(self, req):
         """HTTP DELETE request handler."""
+        # we need to check if this is a versioned object
+        req.method = 'HEAD'
+        obj_head_resp = self.HEAD(req)
+        req.method = 'DELETE'
+        if 'x-object-versions' in obj_head_resp.headers:
+            # this is a version manifest and needs to be handled differently
+            lcontainer, lprefix = \
+                obj_head_resp.headers['x-object-versions'].split('/', 1)
+            try:
+                listing = list(self._listing_iter(lcontainer, lprefix,
+                                req.environ))
+            except ListingIterNotFound:
+                lresp = HTTPNotFound(request=req)
+                lresp.headers['x-object-versions'] = \
+                    obj_head_resp.headers['x-object-versions']
+                return lresp
+            except ListingIterNotAuthorized, err:
+                return err.aresp
+            # now that we have a list of the versions, pick the right one
+            which_version = get_param(req, 'v')
+            if which_version:
+                # client requested a particular version to delete
+                if which_version == '0':
+                    container_name_to_delete = self.container_name
+                    object_name_to_delete = self.object_name
+                else:
+                    container_name_to_delete = lcontainer
+                    object_name_to_delete = lprefix + which_version
+            elif listing:
+                # no version specified, but we have a listing
+                which_version = listing[-1]['name'][len(lprefix):]
+                container_name_to_delete = self.container_name
+                object_name_to_delete = lprefix + which_version
+            else:
+                container_name_to_delete = self.container_name
+                object_name_to_delete = self.object_name
+            self.container_name = container_name_to_delete
+            self.object_name = object_name_to_delete
+            req.path_info = '/' + self.account_name + '/' + \
+                            self.container_name + '/' + self.object_name
+        # now that we have the right object reference, proceed as normal
         (container_partition, containers, _junk, req.acl,
          req.environ['swift_sync_key']) = \
             self.container_info(self.account_name, self.container_name)
