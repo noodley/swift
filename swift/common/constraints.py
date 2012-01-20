@@ -124,6 +124,17 @@ def check_object_creation(req, object_name):
                 prefix[0] == '/':
             return HTTPBadRequest(request=req,
                 body='X-Object-Manifest must in the format container/prefix')
+    if 'x-object-versions' in req.headers:
+        value = req.headers['x-object-versions']
+        container = prefix = None
+        try:
+            container, prefix = value.split('/', 1)
+        except ValueError:
+            pass
+        if not container or not prefix or '?' in value or '&' in value or \
+                prefix[0] == '/':
+            return HTTPBadRequest(request=req,
+                body='X-Object-Versions must in the format container/prefix')
     return check_metadata(req, 'object')
 
 

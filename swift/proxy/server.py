@@ -1178,6 +1178,26 @@ class ObjectController(Controller):
         error_response = check_object_creation(req, self.object_name)
         if error_response:
             return error_response
+        # check if the client is writing to a versioned object
+        req.method = 'HEAD'
+        obj_head_resp = self.HEAD(req)
+        req.method = 'PUT'
+        if 'x-object-versions' in obj_head_resp.headers:
+            # this is a version manifest and needs to be handled differently
+            lcontainer, lprefix = \
+                obj_head_resp.headers['x-object-versions'].split('/', 1)
+            vers_obj_name = lprefix + req.headers['X-Timestamp']
+            self.container_name = lcontainer
+            self.object_name = vers_obj_name
+            req.path_info = '/' + self.account_name + '/' + \
+                            self.container_name + '/' + self.object_name
+            (container_partition, containers, _junk, req.acl,
+             req.environ['swift_sync_key']) = \
+                self.container_info(self.account_name, self.container_name,
+                    account_autocreate=self.app.account_autocreate)
+            partition, nodes = self.app.object_ring.get_nodes(
+                self.account_name, self.container_name, self.object_name)
+
         reader = req.environ['wsgi.input'].read
         data_source = iter(lambda: reader(self.app.client_chunk_size), '')
         source_header = req.headers.get('X-Copy-From')
