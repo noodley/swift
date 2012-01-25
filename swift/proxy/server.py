@@ -902,6 +902,9 @@ class ObjectController(Controller):
                 check_header = 'x-object-manifest'
             else:
                 check_header = 'x-object-versions'
+                if get_param(req, 'v') is None:
+                    # no version specified, short-circuit
+                    return resp
             lcontainer, lprefix = \
                 resp.headers[check_header].split('/', 1)
             try:
@@ -917,13 +920,6 @@ class ObjectController(Controller):
             if check_header == 'x-object-versions':
                 # now that we have a list of the versions, pick the right one
                 which_version = get_param(req, 'v')
-                if which_version == "0" or not listing:
-                    # special case to return the original object
-                    resp.headers['x-object-current-version'] = '0'
-                    return resp
-                if which_version is None:
-                    # get the last one (i.e. the "current")
-                    which_version = listing[-1]['name'][len(lprefix):]
                 ver_obj_name = lprefix + which_version
                 ver_req = Request.blank('/%s/%s/%s' % (
                         quote(self.account_name), quote(lcontainer),
@@ -1147,17 +1143,16 @@ class ObjectController(Controller):
             delete_at_part = delete_at_nodes = None
         partition, nodes = self.app.object_ring.get_nodes(
             self.account_name, self.container_name, self.object_name)
+        # do a HEAD request for container sync and checking object versions
+        hreq = Request.blank(req.path_info,
+                             environ={'REQUEST_METHOD': 'HEAD'})
+        hresp = self.GETorHEAD_base(hreq, _('Object'), partition, nodes,
+            hreq.path_info, self.app.object_ring.replica_count)
         # Used by container sync feature
         if 'x-timestamp' in req.headers:
             try:
                 req.headers['X-Timestamp'] = \
                     normalize_timestamp(float(req.headers['x-timestamp']))
-                # For container sync PUTs, do a HEAD to see if we can
-                # shortcircuit
-                hreq = Request.blank(req.path_info,
-                                     environ={'REQUEST_METHOD': 'HEAD'})
-                self.GETorHEAD_base(hreq, _('Object'), partition, nodes,
-                    hreq.path_info, self.app.object_ring.replica_count)
                 if 'swift_x_timestamp' in hreq.environ and \
                     float(hreq.environ['swift_x_timestamp']) >= \
                         float(req.headers['x-timestamp']):
@@ -1178,25 +1173,30 @@ class ObjectController(Controller):
         error_response = check_object_creation(req, self.object_name)
         if error_response:
             return error_response
-        # check if the client is writing to a versioned object
-        req.method = 'HEAD'
-        obj_head_resp = self.HEAD(req)
-        req.method = 'PUT'
-        if 'x-object-versions' in obj_head_resp.headers:
-            # this is a version manifest and needs to be handled differently
+        if 'x-object-versions' in hresp.headers and \
+                not req.environ.get('swift_versioned_copy'):
+            # This is a version manifest and needs to be handled differently.
+            # First copy the existing data to a new object, then write the
+            # data from this request to the version manifest object.
             lcontainer, lprefix = \
-                obj_head_resp.headers['x-object-versions'].split('/', 1)
-            vers_obj_name = lprefix + req.headers['X-Timestamp']
-            self.container_name = lcontainer
-            self.object_name = vers_obj_name
-            req.path_info = '/' + self.account_name + '/' + \
-                            self.container_name + '/' + self.object_name
-            (container_partition, containers, _junk, req.acl,
-             req.environ['swift_sync_key']) = \
-                self.container_info(self.account_name, self.container_name,
-                    account_autocreate=self.app.account_autocreate)
-            partition, nodes = self.app.object_ring.get_nodes(
-                self.account_name, self.container_name, self.object_name)
+                hresp.headers['x-object-versions'].split('/', 1)
+            new_ts = normalize_timestamp(time.mktime(time.strptime(
+                hresp.headers['last-modified'], '%a, %d %b %Y %H:%M:%S GMT')))
+            vers_obj_name = lprefix + new_ts
+            copy_req = Request.blank(req.path_info,
+                            environ={'REQUEST_METHOD': 'COPY'})
+            copy_req.headers['Destination'] = \
+                            '%s/%s' % (lcontainer, vers_obj_name)
+            copy_req.environ['swift_versioned_copy'] = True
+            copy_resp = self.COPY(copy_req)
+            if copy_resp.status_int // 100 != 2:
+                # could not copy the data, bail
+                return HTTPServiceUnavailable(request=req)
+            for k, v in hresp.headers.iteritems():
+                if k.startswith('x-object-meta-'):
+                    req.headers[k] = v
+            req.headers['x-object-versions'] = \
+                    hresp.headers['x-object-versions']
 
         reader = req.environ['wsgi.input'].read
         data_source = iter(lambda: reader(self.app.client_chunk_size), '')
