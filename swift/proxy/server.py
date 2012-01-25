@@ -1144,7 +1144,7 @@ class ObjectController(Controller):
         partition, nodes = self.app.object_ring.get_nodes(
             self.account_name, self.container_name, self.object_name)
         # do a HEAD request for container sync and checking object versions
-        hreq = Request.blank(req.path_info,
+        hreq = Request.blank(req.path_info, headers={'X-Newest': 'True'},
                              environ={'REQUEST_METHOD': 'HEAD'})
         hresp = self.GETorHEAD_base(hreq, _('Object'), partition, nodes,
             hreq.path_info, self.app.object_ring.replica_count)
