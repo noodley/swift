@@ -1377,8 +1377,7 @@ class ObjectController(Controller):
         hreq = Request.blank(req.path_info, headers={'X-Newest': 'True'},
                              environ={'REQUEST_METHOD': 'HEAD'})
         obj_head_resp = self.HEAD(hreq)
-        which_version = get_param(req, 'v')
-        if 'x-object-versions' in obj_head_resp.headers and which_version:
+        if 'x-object-versions' in obj_head_resp.headers:
             # this is a version manifest and needs to be handled differently
             lcontainer, lprefix = \
                 obj_head_resp.headers['x-object-versions'].split('/', 1)
@@ -1392,12 +1391,23 @@ class ObjectController(Controller):
                 return lresp
             except ListingIterNotAuthorized, err:
                 return err.aresp
-            # now that we have a list of the versions, pick the right one
-            self.container_name = lcontainer
-            self.object_name = lprefix + which_version
-            req.path_info = '/' + self.account_name + '/' + \
+            orig_contianer = self.container_name
+            orig_obj = self.object_name
+            if listing:
+                # there are older versions so copy the previous version to the
+                # current object and delete the previous version
+                self.container_name = lcontainer
+                self.object_name = listing[-1]['name']
+                copy_path = '/' + self.account_name + '/' + \
                             self.container_name + '/' + self.object_name
-        # now that we have the right object reference, proceed as normal
+                creq = Request.blank(copy_path, headers={'X-Newest': 'True'},
+                                 environ={'REQUEST_METHOD': 'COPY'})
+                creq.headers['Destination'] = orig_contianer + '/' + orig_obj
+                creq.environ['swift_versioned_copy'] = True
+                copy_resp = self.COPY(creq)
+                if copy_resp.status_int // 100 != 2:
+                    # could not copy the data, bail
+                    return HTTPServiceUnavailable(request=req)
         (container_partition, containers, _junk, req.acl,
          req.environ['swift_sync_key']) = \
             self.container_info(self.account_name, self.container_name)
