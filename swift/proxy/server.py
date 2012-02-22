@@ -1391,16 +1391,18 @@ class ObjectController(Controller):
                 return lresp
             except ListingIterNotAuthorized, err:
                 return err.aresp
-            orig_contianer = self.container_name
-            orig_obj = self.object_name
             if listing:
                 # there are older versions so copy the previous version to the
                 # current object and delete the previous version
+                orig_contianer = self.container_name
+                orig_obj = self.object_name
                 self.container_name = lcontainer
                 self.object_name = listing[-1]['name']
                 copy_path = '/' + self.account_name + '/' + \
                             self.container_name + '/' + self.object_name
-                creq = Request.blank(copy_path, headers={'X-Newest': 'True'},
+                copy_headers = {'X-Newest': 'True', 'X-Object-Versions':
+                        obj_head_resp.headers['x-object-versions']}
+                creq = Request.blank(copy_path, headers=copy_headers,
                                  environ={'REQUEST_METHOD': 'COPY'})
                 creq.headers['Destination'] = orig_contianer + '/' + orig_obj
                 creq.environ['swift_versioned_copy'] = True
@@ -1408,6 +1410,11 @@ class ObjectController(Controller):
                 if copy_resp.status_int // 100 != 2:
                     # could not copy the data, bail
                     return HTTPServiceUnavailable(request=req)
+                new_del_req = Request.blank(copy_path, environ=req.environ)
+                new_del_req.path_info = copy_path
+                self.container_name = lcontainer
+                self.object_name = listing[-1]['name']
+                req = new_del_req
         (container_partition, containers, _junk, req.acl,
          req.environ['swift_sync_key']) = \
             self.container_info(self.account_name, self.container_name)
