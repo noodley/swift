@@ -933,7 +933,6 @@ class ObjectController(Controller):
                             self.app.object_ring), ver_req.path_info,
                             self.app.object_ring.replica_count)
                 resp.headers[check_header] = orig_check_header_value
-                resp.headers['x-object-current-version'] = which_version
             elif len(listing) > CONTAINER_LISTING_LIMIT:
                 resp = Response(headers=resp.headers, request=req,
                                 conditional_response=True)
@@ -1013,6 +1012,7 @@ class ObjectController(Controller):
             req.headers['X-Copy-From'] = quote('/%s/%s' % (self.container_name,
                 self.object_name))
             req.headers['X-Fresh-Metadata'] = 'true'
+            req.environ['swift_versioned_copy'] = True
             resp = self.PUT(req)
             # Older editions returned 202 Accepted on object POSTs, so we'll
             # convert any 201 Created responses to that for compatibility with
