@@ -609,23 +609,19 @@ class TestProxyServer(unittest.TestCase):
             proxy_server.get_logger = mock_get_logger
             test_conf({})
             line = snarf.strip_value()
-            print line
             self.assert_(line.startswith('swift'))
             self.assert_(line.endswith('INFO'))
             test_conf({'log_name': 'snarf-test'})
             line = snarf.strip_value()
-            print line
             self.assert_(line.startswith('snarf-test'))
             self.assert_(line.endswith('INFO'))
             test_conf({'log_name': 'snarf-test', 'log_level': 'ERROR'})
             line = snarf.strip_value()
-            print line
             self.assertFalse(line)
             test_conf({'log_name': 'snarf-test', 'log_level': 'ERROR',
                        'access_log_name': 'access-test',
                        'access_log_level': 'INFO'})
             line = snarf.strip_value()
-            print line
             self.assert_(line.startswith('access-test'))
             self.assert_(line.endswith('INFO'))
 
@@ -2534,7 +2530,6 @@ class TestObjectController(unittest.TestCase):
         headers = readuntil2crlfs(fd)
         exp = 'HTTP/1.1 200'
         self.assertEquals(headers[:len(exp)], exp)
-        print headers
         self.assert_('Content-Type: text/jibberish' in headers)
         # Check set content type
         sock = connect_tcp(('localhost', prolis.getsockname()[1]))
