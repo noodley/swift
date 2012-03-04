@@ -609,23 +609,19 @@ class TestProxyServer(unittest.TestCase):
             proxy_server.get_logger = mock_get_logger
             test_conf({})
             line = snarf.strip_value()
-            print line
             self.assert_(line.startswith('swift'))
             self.assert_(line.endswith('INFO'))
             test_conf({'log_name': 'snarf-test'})
             line = snarf.strip_value()
-            print line
             self.assert_(line.startswith('snarf-test'))
             self.assert_(line.endswith('INFO'))
             test_conf({'log_name': 'snarf-test', 'log_level': 'ERROR'})
             line = snarf.strip_value()
-            print line
             self.assertFalse(line)
             test_conf({'log_name': 'snarf-test', 'log_level': 'ERROR',
                        'access_log_name': 'access-test',
                        'access_log_level': 'INFO'})
             line = snarf.strip_value()
-            print line
             self.assert_(line.startswith('access-test'))
             self.assert_(line.endswith('INFO'))
 
@@ -1830,7 +1826,6 @@ class TestObjectController(unittest.TestCase):
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                                 headers={'Content-Length': '0'})
             req.account = 'a'
-            print "DEDUG in test: Copy 0"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 201, 201, 201, 201, 201, 201)
                 #                 acct cont head head head obj  obj  obj
@@ -1840,7 +1835,6 @@ class TestObjectController(unittest.TestCase):
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'COPY'},
                                 headers={'Destination': 'c/o'})
             req.account = 'a'
-            print "DEDUG in test: Copy 1"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200,
                     200, 201, 201, 201)
@@ -1856,7 +1850,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': 'c/o'})
             req.account = 'a'
             controller.object_name = 'o/o2'
-            print "DEDUG in test: Copy 2"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200,
                     200, 201, 201, 201)
@@ -1871,7 +1864,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
-            print "DEDUG in test: Copy 3"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200,
                     200, 201, 201, 201)
@@ -1887,7 +1879,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o/o2'
-            print "DEDUG in test: Copy 4"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200,
                     200, 201, 201, 201)
@@ -1902,7 +1893,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': 'c_o'})
             req.account = 'a'
             controller.object_name = 'o'
-            print "DEDUG in test: Copy 5"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200)
                 #                 acct cont
@@ -1914,7 +1904,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
-            print "DEDUG in test: Copy 6"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 200, 200, 200, 503, 503, 503)
                 #                 acct cont head head head objc objc objc
@@ -1926,7 +1915,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
-            print "DEDUG in test: Copy 7"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 404, 404, 404, 404, 404, 404)
                 #                 acct cont head head head objc objc objc
@@ -1938,7 +1926,6 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
-            print "DEDUG in test: Copy 8"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 404, 404, 200, 404, 404, 200, 201,
                                   201, 201)
@@ -1953,7 +1940,6 @@ class TestObjectController(unittest.TestCase):
                                           'X-Object-Meta-Ours': 'okay'})
             req.account = 'a'
             controller.object_name = 'o'
-            print "DEDUG in test: Copy 9"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 201,
                                   201, 201)
@@ -2544,7 +2530,6 @@ class TestObjectController(unittest.TestCase):
         headers = readuntil2crlfs(fd)
         exp = 'HTTP/1.1 200'
         self.assertEquals(headers[:len(exp)], exp)
-        print headers
         self.assert_('Content-Type: text/jibberish' in headers)
         # Check set content type
         sock = connect_tcp(('localhost', prolis.getsockname()[1]))
