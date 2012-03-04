@@ -169,6 +169,10 @@ def fake_http_connect(*code_iter, **kwargs):
             return self
 
         def getexpect(self):
+            if self.status == -2:
+                raise HTTPException()
+            if self.status == -3:
+                return FakeConn(507)
             return FakeConn(100)
 
         def getheaders(self):
@@ -232,7 +236,7 @@ def fake_http_connect(*code_iter, **kwargs):
         status = code_iter.next()
         etag = etag_iter.next()
         timestamp = timestamps_iter.next()
-        if status == -1:
+        if status <= 0:
             raise HTTPException()
         return FakeConn(status, etag, body=kwargs.get('body', ''),
                         timestamp=timestamp)
