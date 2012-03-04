@@ -806,10 +806,10 @@ class TestObjectController(unittest.TestCase):
                 res = controller.PUT(req)
                 expected = str(expected)
                 self.assertEquals(res.status[:len(expected)], expected)
-            test_status_map((200, 200, 201, 201, 201), 201)
-            test_status_map((200, 200, 201, 201, 500), 201)
-            test_status_map((200, 200, 204, 404, 404), 404)
-            test_status_map((200, 200, 204, 500, 404), 503)
+            test_status_map((200, 200, 200, 200, 200, 201, 201, 201), 201)
+            test_status_map((200, 200, 200, 200, 200, 201, 201, 500), 201)
+            test_status_map((200, 200, 200, 200, 200, 204, 404, 404), 404)
+            test_status_map((200, 200, 200, 200, 200, 204, 500, 404), 503)
 
     def test_PUT_connect_exceptions(self):
 
@@ -820,6 +820,9 @@ class TestObjectController(unittest.TestCase):
                 def __init__(self, status):
                     self.status = status
                     self.reason = 'Fake'
+                    self.etag = md5()
+                    self.body = ''
+                    self.timestamp = 1
 
                 def getresponse(self):
                     return self
@@ -827,8 +830,34 @@ class TestObjectController(unittest.TestCase):
                 def read(self, amt=None):
                     return ''
 
-                def getheader(self, name):
-                    return ''
+#                def getheader(self, name, default=None):
+#                    return default or ''
+
+                def getheader(self, name, default=None):
+                    return dict(self.getheaders()).get(name.lower(), default)
+
+                def getheaders(self):
+                    headers = {'content-length': len(self.body),
+                               'content-type': 'x-application/test',
+                               'x-timestamp': self.timestamp,
+                               'last-modified': self.timestamp,
+                               'x-object-meta-test': 'testing',
+                               'etag':
+                                    self.etag or '"68b329da9893e34099c7d8ad5cb9c940"',
+                               'x-works': 'yes',
+                               }
+                    if not self.timestamp:
+                        del headers['x-timestamp']
+                    try:
+                        headers['x-container-timestamp'] = '1'
+                    except StopIteration:
+                        pass
+                    if 'slow' in kwargs:
+                        headers['content-length'] = '4'
+                    if 'headers' in kwargs:
+                        headers.update(kwargs['headers'])
+                    return headers.items()
+
 
                 def getexpect(self):
                     if self.status == -2:
@@ -852,7 +881,8 @@ class TestObjectController(unittest.TestCase):
                 'container', 'object')
 
             def test_status_map(statuses, expected):
-                proxy_server.http_connect = mock_http_connect(*statuses)
+                # proxy_server.http_connect = mock_http_connect(*statuses)
+                proxy_server.http_connect = fake_http_connect(*statuses)
                 self.app.memcache.store = {}
                 req = Request.blank('/a/c/o.jpg', {})
                 req.content_length = 0
@@ -860,11 +890,11 @@ class TestObjectController(unittest.TestCase):
                 res = controller.PUT(req)
                 expected = str(expected)
                 self.assertEquals(res.status[:len(expected)], expected)
-            test_status_map((200, 200, 201, 201, -1), 201)
-            test_status_map((200, 200, 201, 201, -2), 201)  # expect timeout
-            test_status_map((200, 200, 201, 201, -3), 201)  # error limited
-            test_status_map((200, 200, 201, -1, -1), 503)
-            test_status_map((200, 200, 503, 503, -1), 503)
+            test_status_map((200, 200, 200, 200, 200, 201, 201, -1), 201)
+            test_status_map((200, 200, 200, 200, 200, 201, 201, -2), 201)  # expect timeout
+            test_status_map((200, 200, 200, 200, 200, 201, 201, -3), 201)  # error limited
+            test_status_map((200, 200, 200, 200, 200, 201, -1, -1), 503)
+            test_status_map((200, 200, 200, 200, 200, 503, 503, -1), 503)
 
     def test_PUT_send_exceptions(self):
 
@@ -878,6 +908,8 @@ class TestObjectController(unittest.TestCase):
                     self.host = '1.2.3.4'
                     self.port = 1024
                     self.etag = md5()
+                    self.body = ''
+                    self.timestamp = 1
 
                 def getresponse(self):
                     self.etag = self.etag.hexdigest()
@@ -895,8 +927,35 @@ class TestObjectController(unittest.TestCase):
                     else:
                         self.etag.update(amt)
 
-                def getheader(self, name):
-                    return self.headers.get(name, '')
+#                def getheader(self, name, default=None):
+#                    default = default or ''
+#                    return self.headers.get(name, default)
+
+                def getheader(self, name, default=None):
+                    return dict(self.getheaders()).get(name.lower(), default)
+
+                def getheaders(self):
+                    headers = {'content-length': len(self.body),
+                               'content-type': 'x-application/test',
+                               'x-timestamp': self.timestamp,
+                               'last-modified': self.timestamp,
+                               'x-object-meta-test': 'testing',
+                               'etag':
+                                    self.etag or '"68b329da9893e34099c7d8ad5cb9c940"',
+                               'x-works': 'yes',
+                               }
+                    if not self.timestamp:
+                        del headers['x-timestamp']
+                    try:
+                        headers['x-container-timestamp'] = '1'
+                    except StopIteration:
+                        pass
+                    if 'slow' in kwargs:
+                        headers['content-length'] = '4'
+                    if 'headers' in kwargs:
+                        headers.update(kwargs['headers'])
+                    return headers.items()
+
 
                 def getexpect(self):
                     return FakeConn(100)
@@ -911,16 +970,17 @@ class TestObjectController(unittest.TestCase):
 
             def test_status_map(statuses, expected):
                 self.app.memcache.store = {}
-                proxy_server.http_connect = mock_http_connect(*statuses)
+                # proxy_server.http_connect = mock_http_connect(*statuses)
+                proxy_server.http_connect = fake_http_connect(*statuses)
                 req = Request.blank('/a/c/o.jpg',
                     environ={'REQUEST_METHOD': 'PUT'}, body='some data')
                 self.app.update_request(req)
                 res = controller.PUT(req)
                 expected = str(expected)
                 self.assertEquals(res.status[:len(expected)], expected)
-            test_status_map((200, 200, 201, -1, 201), 201)
-            test_status_map((200, 200, 201, -1, -1), 503)
-            test_status_map((200, 200, 503, 503, -1), 503)
+            test_status_map((200, 200, 200, 200, 200, 201, -1, 201), 201)
+            test_status_map((200, 200, 200, 200, 200, 201, -1, -1), 503)
+            test_status_map((200, 200, 200, 200, 200, 503, 503, -1), 503)
 
     def test_PUT_max_size(self):
         with save_globals():
@@ -945,6 +1005,9 @@ class TestObjectController(unittest.TestCase):
                     self.reason = 'Fake'
                     self.host = '1.2.3.4'
                     self.port = 1024
+                    self.etag = md5()
+                    self.body = ''
+                    self.timestamp = 1
 
                 def getresponse(self):
                     if self.status == -1:
@@ -957,8 +1020,34 @@ class TestObjectController(unittest.TestCase):
                 def send(self, amt=None):
                     pass
 
-                def getheader(self, name):
-                    return ''
+       #         def getheader(self, name, default=None):
+       #             return default or ''
+
+                def getheader(self, name, default=None):
+                    return dict(self.getheaders()).get(name.lower(), default)
+
+                def getheaders(self):
+                    headers = {'content-length': len(self.body),
+                               'content-type': 'x-application/test',
+                               'x-timestamp': self.timestamp,
+                               'last-modified': self.timestamp,
+                               'x-object-meta-test': 'testing',
+                               'etag':
+                                    self.etag or '"68b329da9893e34099c7d8ad5cb9c940"',
+                               'x-works': 'yes',
+                               }
+                    if not self.timestamp:
+                        del headers['x-timestamp']
+                    try:
+                        headers['x-container-timestamp'] = '1'
+                    except StopIteration:
+                        pass
+                    if 'slow' in kwargs:
+                        headers['content-length'] = '4'
+                    if 'headers' in kwargs:
+                        headers.update(kwargs['headers'])
+                    return headers.items()
+
 
                 def getexpect(self):
                     return FakeConn(100)
@@ -973,7 +1062,8 @@ class TestObjectController(unittest.TestCase):
 
             def test_status_map(statuses, expected):
                 self.app.memcache.store = {}
-                proxy_server.http_connect = mock_http_connect(*statuses)
+                # proxy_server.http_connect = mock_http_connect(*statuses)
+                proxy_server.http_connect = fake_http_connect(*statuses)
                 req = Request.blank('/a/c/o.jpg', {})
                 req.content_length = 0
                 self.app.update_request(req)
@@ -981,9 +1071,9 @@ class TestObjectController(unittest.TestCase):
                 expected = str(expected)
                 self.assertEquals(res.status[:len(str(expected))],
                                   str(expected))
-            test_status_map((200, 200, 201, 201, -1), 201)
-            test_status_map((200, 200, 201, -1, -1), 503)
-            test_status_map((200, 200, 503, 503, -1), 503)
+            test_status_map((200, 200, 200, 200, 200, 201, 201, -1), 201)
+            test_status_map((200, 200, 200, 200, 200, 201, -1, -1), 503)
+            test_status_map((200, 200, 200, 200, 200, 503, 503, -1), 503)
 
     def test_POST(self):
         with save_globals():
@@ -1022,13 +1112,13 @@ class TestObjectController(unittest.TestCase):
                 res = controller.POST(req)
                 expected = str(expected)
                 self.assertEquals(res.status[:len(expected)], expected)
-            test_status_map((200, 200, 200, 200, 200, 202, 202, 202), 202)
-            test_status_map((200, 200, 200, 200, 200, 202, 202, 500), 202)
-            test_status_map((200, 200, 200, 200, 200, 202, 500, 500), 503)
-            test_status_map((200, 200, 200, 200, 200, 202, 404, 500), 503)
-            test_status_map((200, 200, 200, 200, 200, 202, 404, 404), 404)
-            test_status_map((200, 200, 200, 200, 200, 404, 500, 500), 503)
-            test_status_map((200, 200, 200, 200, 200, 404, 404, 404), 404)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 202, 202, 202), 202)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 202, 202, 500), 202)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 202, 500, 500), 503)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 202, 404, 500), 503)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 202, 404, 404), 404)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 404, 500, 500), 503)
+            test_status_map((200, 200, 200, 200, 200, 200, 200, 200, 404, 404, 404), 404)
 
     def test_DELETE(self):
         with save_globals():
@@ -1043,12 +1133,12 @@ class TestObjectController(unittest.TestCase):
                 res = controller.DELETE(req)
                 self.assertEquals(res.status[:len(str(expected))],
                                   str(expected))
-            test_status_map((200, 200, 204, 204, 204), 204)
-            test_status_map((200, 200, 204, 204, 500), 204)
-            test_status_map((200, 200, 204, 404, 404), 404)
-            test_status_map((200, 200, 204, 500, 404), 503)
-            test_status_map((200, 200, 404, 404, 404), 404)
-            test_status_map((200, 200, 404, 404, 500), 404)
+            test_status_map((200, 200, 200, 200, 200, 204, 204, 204), 204)
+            test_status_map((200, 200, 200, 200, 200, 204, 204, 500), 204)
+            test_status_map((200, 200, 200, 200, 200, 204, 404, 404), 404)
+            test_status_map((200, 200, 200, 200, 200, 204, 500, 404), 503)
+            test_status_map((200, 200, 200, 200, 200, 404, 404, 404), 404)
+            test_status_map((200, 200, 200, 200, 200, 404, 404, 500), 404)
 
     def test_HEAD(self):
         with save_globals():
@@ -1176,8 +1266,8 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                 'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 202, 202, 202)
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 202, 202, 202)
+                #                 acct cont head head head objc objc objc obj  obj  obj
             req = Request.blank('/a/c/o', {}, headers={
                                             'Content-Type': 'foo/bar',
                                             'X-Object-Meta-Foo': 'x' * 256})
@@ -1219,8 +1309,8 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                 'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 202, 202, 202)
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 202, 202, 202)
+                #                 acct cont head head head objc objc objc obj  obj  obj
             req = Request.blank('/a/c/o', {}, headers={
                 'Content-Type': 'foo/bar',
                 ('X-Object-Meta-' + 'x' * 128): 'x'})
@@ -1295,8 +1385,8 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                                                        'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
-                #                 acct cont obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head obj  obj  obj
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
             self.app.client_timeout = 0.1
@@ -1305,8 +1395,8 @@ class TestObjectController(unittest.TestCase):
                 headers={'Content-Length': '4', 'Content-Type': 'text/plain'})
             self.app.update_request(req)
             proxy_server.http_connect = \
-                fake_http_connect(201, 201, 201)
-                #                 obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head obj  obj  obj
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 408)
 
@@ -1340,8 +1430,8 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                                                        'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
-                #                 acct cont obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head obj  obj  obj
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 499)
 
@@ -1406,7 +1496,7 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                                                        'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201, slow=True)
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201, slow=True)
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
             self.app.node_timeout = 0.1
@@ -1531,7 +1621,7 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                                                      'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 200)
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'DELETE'})
             self.app.update_request(req)
             resp = getattr(controller, 'DELETE')(req)
@@ -1562,8 +1652,8 @@ class TestObjectController(unittest.TestCase):
             self.assertEquals(resp.status_int, 404)
 
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 204, 204, 204)
-                #                 acct cont obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 204, 204, 204)
+                #                 acct cont head head head obj  obj  obj
             resp = getattr(controller, 'DELETE')(req)
             self.assertEquals(resp.status_int, 204)
 
@@ -1649,15 +1739,15 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                                                        'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
-                #                 acct cont obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head obj  obj  obj
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                                 headers={'Content-Length': '0'})
             self.app.update_request(req)
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
 
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                 headers={'Content-Length': '0',
                          'X-Object-Meta-' + ('a' *
@@ -1665,7 +1755,7 @@ class TestObjectController(unittest.TestCase):
             self.app.update_request(req)
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                 headers={'Content-Length': '0',
                          'X-Object-Meta-' + ('a' *
@@ -1674,7 +1764,7 @@ class TestObjectController(unittest.TestCase):
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 400)
 
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                 headers={'Content-Length': '0',
                          'X-Object-Meta-Too-Long': 'a' *
@@ -1682,7 +1772,7 @@ class TestObjectController(unittest.TestCase):
             self.app.update_request(req)
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                 headers={'Content-Length': '0',
                          'X-Object-Meta-Too-Long': 'a' *
@@ -1691,7 +1781,7 @@ class TestObjectController(unittest.TestCase):
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 400)
 
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             headers = {'Content-Length': '0'}
             for x in xrange(MAX_META_COUNT):
                 headers['X-Object-Meta-%d' % x] = 'v'
@@ -1700,7 +1790,7 @@ class TestObjectController(unittest.TestCase):
             self.app.update_request(req)
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             headers = {'Content-Length': '0'}
             for x in xrange(MAX_META_COUNT + 1):
                 headers['X-Object-Meta-%d' % x] = 'v'
@@ -1710,7 +1800,7 @@ class TestObjectController(unittest.TestCase):
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 400)
 
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             headers = {'Content-Length': '0'}
             header_value = 'a' * MAX_META_VALUE_LENGTH
             size = 0
@@ -1728,7 +1818,7 @@ class TestObjectController(unittest.TestCase):
             self.app.update_request(req)
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
-            proxy_server.http_connect = fake_http_connect(201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             headers['X-Object-Meta-a'] = \
                 'a' * (MAX_META_OVERALL_SIZE - size)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
@@ -1746,8 +1836,8 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Content-Length': '0'})
             self.app.update_request(req)
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
-                #                 acct cont obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head obj  obj  obj
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
 
@@ -1866,8 +1956,8 @@ class TestObjectController(unittest.TestCase):
                                           'X-Copy-From': '/c/o'})
             self.app.update_request(req)
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 404, 404, 404)
-                #                 acct cont objc objc objc
+                fake_http_connect(200, 200, 404, 404, 404, 404, 404, 404)
+                #                 acct cont head head head objc objc objc
             self.app.memcache.store = {}
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 404)
@@ -1878,8 +1968,8 @@ class TestObjectController(unittest.TestCase):
                                           'X-Copy-From': '/c/o'})
             self.app.update_request(req)
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 404, 404, 200, 201, 201, 201)
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 404, 404, 200, 404, 404, 200, 201, 201, 201)
+                #                 acct cont head head head objc objc objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
@@ -1891,8 +1981,8 @@ class TestObjectController(unittest.TestCase):
                                           'X-Object-Meta-Ours': 'okay'})
             self.app.update_request(req)
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head objc objc objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
@@ -1906,20 +1996,22 @@ class TestObjectController(unittest.TestCase):
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                                 headers={'Content-Length': '0'})
             req.account = 'a'
+            print "DEDUG in test: Copy 0"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
-                #                 acct cont obj  obj  obj
+                fake_http_connect(200, 200, 201, 201, 201, 201, 201, 201)
+                #                 acct cont head head head obj  obj  obj
             resp = controller.PUT(req)
             self.assertEquals(resp.status_int, 201)
 
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'COPY'},
                                 headers={'Destination': 'c/o'})
             req.account = 'a'
+            print "DEDUG in test: Copy 1"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 201, 201,
-                    201)
-                #                 acct cont acct cont objc objc objc obj  obj
-                #   obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200, 
+                    200, 201, 201, 201)
+                #                 acct cont head head head acct cont objc objc 
+                #   objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -1930,11 +2022,12 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': 'c/o'})
             req.account = 'a'
             controller.object_name = 'o/o2'
+            print "DEDUG in test: Copy 2"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 201, 201,
-                    201)
-                #                 acct cont acct cont objc objc objc obj  obj
-                #   obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200, 
+                    200, 201, 201, 201)
+                #                 acct cont head head head acct cont objc objc 
+                #   objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -1944,11 +2037,12 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
+            print "DEDUG in test: Copy 3"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 201, 201,
-                    201)
-                #                 acct cont acct cont objc objc objc obj  obj
-                #   obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200, 
+                    200, 201, 201, 201)
+                #                 acct cont head head head acct cont objc objc 
+                #   objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -1959,11 +2053,12 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o/o2'
+            print "DEDUG in test: Copy 4"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 201, 201,
-                    201)
-                #                 acct cont acct cont objc objc objc obj  obj
-                #   obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 200, 
+                    200, 201, 201, 201)
+                #                 acct cont head head head acct cont objc objc 
+                #   objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -1973,6 +2068,7 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': 'c_o'})
             req.account = 'a'
             controller.object_name = 'o'
+            print "DEDUG in test: Copy 5"
             proxy_server.http_connect = \
                 fake_http_connect(200, 200)
                 #                 acct cont
@@ -1984,9 +2080,10 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
+            print "DEDUG in test: Copy 6"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 503, 503, 503)
-                #                 acct cont objc objc objc
+                fake_http_connect(200, 200, 200, 200, 200, 503, 503, 503)
+                #                 acct cont head head head objc objc objc
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 503)
@@ -1995,9 +2092,10 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
+            print "DEDUG in test: Copy 7"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 404, 404, 404)
-                #                 acct cont objc objc objc
+                fake_http_connect(200, 200, 404, 404, 404, 404, 404, 404)
+                #                 acct cont head head head objc objc objc
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 404)
@@ -2006,9 +2104,10 @@ class TestObjectController(unittest.TestCase):
                                 headers={'Destination': '/c/o'})
             req.account = 'a'
             controller.object_name = 'o'
+            print "DEDUG in test: Copy 8"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 404, 404, 200, 201, 201, 201)
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 404, 404, 200, 404, 404, 200, 201, 201, 201)
+                #                 acct cont head head head objc objc objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -2018,9 +2117,10 @@ class TestObjectController(unittest.TestCase):
                                           'X-Object-Meta-Ours': 'okay'})
             req.account = 'a'
             controller.object_name = 'o'
+            print "DEDUG in test: Copy 9"
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 201, 201, 201)
+                #                 acct cont head head head objc objc objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -2036,9 +2136,9 @@ class TestObjectController(unittest.TestCase):
             req.account = 'a'
             controller.object_name = 'o'
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201,
-                      timestamps=('1', '1', '1', '3', '2', '4', '4', '4'))
-                #                 acct cont objc objc objc obj  obj  obj
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 201, 201, 201,
+                      timestamps=('1', '1', '1', '1', '1', '1', '3', '2', '4', '4', '4'))
+                #                 acct cont head head head objc objc objc obj  obj  obj
             self.app.memcache.store = {}
             resp = controller.COPY(req)
             self.assertEquals(resp.status_int, 201)
@@ -2067,7 +2167,7 @@ class TestObjectController(unittest.TestCase):
                 return data
 
         with save_globals():
-            proxy_server.http_connect = fake_http_connect(201, 201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(201, 201, 200, 200, 200, 201, 201)
             controller = proxy_server.ObjectController(self.app, 'account',
                 'container', 'object')
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'COPY'},
@@ -2082,7 +2182,7 @@ class TestObjectController(unittest.TestCase):
 
             # test 413 entity to large
             from swift.proxy import server
-            proxy_server.http_connect = fake_http_connect(201, 201, 201, 201)
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'COPY'},
                 headers={'Transfer-Encoding': 'chunked',
                 'Content-Type': 'foo/bar'})
@@ -2659,8 +2759,8 @@ class TestObjectController(unittest.TestCase):
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
                                 headers={'Content-Length': '0'})
             self.app.update_request(req)
-            proxy_server.http_connect = fake_http_connect(200, 201, 201, 201,
-                etags=[None,
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201,
+                etags=[None, None, None, None,
                        '68b329da9893e34099c7d8ad5cb9c940',
                        '68b329da9893e34099c7d8ad5cb9c940',
                        '68b329da9893e34099c7d8ad5cb9c941'])
@@ -2674,8 +2774,8 @@ class TestObjectController(unittest.TestCase):
                                     'ETag': '68b329da9893e34099c7d8ad5cb9c940',
                                 })
             self.app.update_request(req)
-            proxy_server.http_connect = fake_http_connect(200, 422, 422, 503,
-                etags=['68b329da9893e34099c7d8ad5cb9c940',
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 422, 422, 503,
+                etags=[None, None, None, '68b329da9893e34099c7d8ad5cb9c940',
                        '68b329da9893e34099c7d8ad5cb9c941',
                        None,
                        None])
@@ -2685,7 +2785,7 @@ class TestObjectController(unittest.TestCase):
     def test_request_bytes_transferred_attr(self):
         with save_globals():
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             controller = proxy_server.ObjectController(self.app, 'account',
                             'container', 'object')
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
@@ -2699,7 +2799,7 @@ class TestObjectController(unittest.TestCase):
     def test_copy_zero_bytes_transferred_attr(self):
         with save_globals():
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201,
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 201, 201, 201,
                                   body='1234567890')
             controller = proxy_server.ObjectController(self.app, 'account',
                             'container', 'object')
@@ -2727,7 +2827,7 @@ class TestObjectController(unittest.TestCase):
     def test_request_client_disconnect_attr(self):
         with save_globals():
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             controller = proxy_server.ObjectController(self.app, 'account',
                             'container', 'object')
             req = Request.blank('/a/c/o', environ={'REQUEST_METHOD': 'PUT'},
@@ -2897,7 +2997,7 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                 'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 200, 200, 200, 202, 202, 202)
+                fake_http_connect(200, 200, 200, 200, 200, 200, 200, 200, 202, 202, 202)
             self.app.memcache.store = {}
             orig_time = proxy_server.time.time
             try:
@@ -3001,7 +3101,7 @@ class TestObjectController(unittest.TestCase):
             controller = proxy_server.ObjectController(self.app, 'account',
                 'container', 'object')
             proxy_server.http_connect = \
-                fake_http_connect(200, 200, 201, 201, 201)
+                fake_http_connect(200, 200, 200, 200, 200, 201, 201, 201)
             self.app.memcache.store = {}
             orig_time = proxy_server.time.time
             try:
@@ -3701,7 +3801,7 @@ class TestAccountController(unittest.TestCase):
 
     def test_response_get_accept_ranges_header(self):
         with save_globals():
-            proxy_server.http_connect = fake_http_connect(200, 200, body='{}')
+            proxy_server.http_connect = fake_http_connect(200, 200, 200, 200, 200, body='{}')
             controller = proxy_server.AccountController(self.app, 'account')
             req = Request.blank('/a?format=json')
             self.app.update_request(req)
